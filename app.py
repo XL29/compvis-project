@@ -7,6 +7,7 @@ import itertools
 from collections import Counter
 from collections import deque
 from djitellopy import Tello
+import keyboard
 
 import cv2 as cv
 import numpy as np
@@ -15,6 +16,7 @@ import mediapipe as mp
 from utils import CvFpsCalc
 from model import KeyPointClassifier
 from model import PointHistoryClassifier
+from object_detection import objectDetection, visualize
 
 
 def get_args():
@@ -51,11 +53,16 @@ def main():
     min_tracking_confidence = args.min_tracking_confidence
 
     use_brect = True
+    """ device = args.device
+    cap_width = args.width
+    cap_height = args.height
+    fps = 30 """
 
     ################################################################
-    """ cap = cv.VideoCapture(cap_device)
+    """ cap = cv.VideoCapture(device)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
-    cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height) """
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
+    cap.set(cv.CAP_PROP_FPS, fps) """
 
     ##############################################################
     mp_hands = mp.solutions.hands
@@ -101,6 +108,7 @@ def main():
     while True:
         fps = cvFpsCalc.get()
 
+
         ##################################################
         key = cv.waitKey(10)
         if key == 27:  # ESC
@@ -115,6 +123,7 @@ def main():
         cap = cv.resize(cap, (960, 720))
         image = cap
         image = cv.flip(image, 1)
+        #image = objectDetection(image)
         debug_image = copy.deepcopy(image)
 
         ##############################################################
@@ -124,8 +133,11 @@ def main():
         results = hands.process(image)
         image.flags.writeable = True
 
+        #hand_ids = [100, 100]
+
         # Hand gesture is recognized here ####################################################################
         if results.multi_hand_landmarks is not None:
+            index = 0
             for hand_landmarks, handedness in zip(results.multi_hand_landmarks,
                                                   results.multi_handedness):
    
@@ -142,18 +154,14 @@ def main():
                             pre_processed_point_history_list)
 
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
+                #hand_ids[index] = hand_sign_id
+
                 if hand_sign_id == 2: 
                     point_history.append(landmark_list[8])  
                 else:
                     point_history.append([0, 0])
 
                 ##############################################################
-                if hand_sign_id == 2:
-                    print("Pointer: Takeoff")
-                    me.takeoff()
-                elif hand_sign_id == 3:
-                    print("OK: Land")
-                    me.land()
 
                 finger_gesture_id = 0
                 point_history_len = len(pre_processed_point_history_list)
@@ -174,14 +182,23 @@ def main():
                     keypoint_classifier_labels[hand_sign_id],
                     point_history_classifier_labels[most_common_fg_id[0][0]],
                 )
+
+                index += 1
         else:
             point_history.append([0, 0])
-
+        
         debug_image = draw_point_history(debug_image, point_history)
         debug_image = draw_info(debug_image, fps, mode, number)
+        object_detection_results = objectDetection(image.copy())
+        finalizedImage = visualize(debug_image, object_detection_results)
+        #print(hand_ids)
 
         ##############################################################
-        cv.imshow('Hand Gesture Recognition', debug_image)
+        cv.imshow('Hand Gesture Recognition', finalizedImage)
+
+        if keyboard.is_pressed('esc'): # Point up
+            print("Pressed escape key")
+            pass
 
     cap.release()
     cv.destroyAllWindows()
