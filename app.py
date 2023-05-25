@@ -161,8 +161,6 @@ def main():
                 else:
                     point_history.append([0, 0])
 
-                ##############################################################
-
                 finger_gesture_id = 0
                 point_history_len = len(pre_processed_point_history_list)
                 if point_history_len == (history_length * 2):
@@ -183,7 +181,15 @@ def main():
                     point_history_classifier_labels[most_common_fg_id[0][0]],
                 )
 
-                index += 1
+                ##############################################################
+                if mode == 0:
+                    if hand_sign_id == 2:
+                        print("Pointer: Takeoff")
+                        me.takeoff()
+                    elif hand_sign_id == 3:
+                        print("OK: Land")
+                        me.land()
+
         else:
             point_history.append([0, 0])
         
