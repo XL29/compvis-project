@@ -7,7 +7,9 @@ import itertools
 from collections import Counter
 from collections import deque
 from djitellopy import Tello
-import keyboard
+# import keyboard
+import threading as th
+from time import sleep
 
 import cv2 as cv
 import numpy as np
@@ -44,6 +46,7 @@ cap_width = args.width
 cap_height = args.height
 global in_flight
 in_flight = False
+curr_command = None
 
 def main():
     ##################################################################
@@ -195,6 +198,15 @@ def main():
                     elif hand_sign_id == 1 and in_flight:
                         print("OK: Land")
                         me.land()
+                    #gesture = th.Thread(target=input_buffer, args=(hand_sign_id))
+                    #gesture.start()
+
+                    control = th.Thread(target=drone_control, args=(me, hand_sign_id))
+                    control.start()
+
+                    # drone_control(me, hand_sign_id)
+                
+                curr_command = hand_sign_id
 
         else:
             point_history.append([0, 0])
@@ -211,9 +223,9 @@ def main():
         ##############################################################
         cv.imshow('Hand Gesture Recognition', finalizedImage)
 
-        if keyboard.is_pressed('esc'): # Point up
-            print("Pressed escape key")
-            pass
+        #if keyboard.is_pressed('esc'): # Point up
+            #print("Pressed escape key")
+            #pass
 
         if keyboard.is_pressed('space'): # Point up
             print("Pressed space key")
@@ -627,6 +639,27 @@ def draw_info(image, fps, mode, number):
                        cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
                        cv.LINE_AA)
     return image
+
+def input_buffer(gesture_id):
+    sleep(1)
+
+    return gesture_id
+
+def drone_control(drone, gesture_id):
+
+    left_right, forward_back, up_down, yaw = 0,0,0,0
+    speed = 30
+
+    if gesture_id == 1:
+        sleep(2)
+        drone.takeoff()
+        
+    if gesture_id == 0:
+        sleep(2)
+        drone.land()
+        
+
+    return
 
 
 if __name__ == '__main__':
