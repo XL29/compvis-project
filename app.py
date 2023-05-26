@@ -7,7 +7,10 @@ import itertools
 from collections import Counter
 from collections import deque
 from djitellopy import Tello
-import keyboard
+# import keyboard
+import threading as th
+from time import sleep
+from collections import Counter, deque
 
 import cv2 as cv
 import numpy as np
@@ -39,30 +42,40 @@ def get_args():
     args = parser.parse_args()
 
     return args
-
+args = get_args()
+cap_width = args.width
+cap_height = args.height
+in_flight = False
+curr_command = None
+takeOFF = th.Event()
+landing = th.Event()
 
 def main():
+    ##################################################################
+    # in_flight = False
     ##################################################################
     args = get_args()
     me = Tello()
     me.connect()
     me.streamon()
+    global in_flight
+
+    pError = 0 
+    pid = [0.4, 0.4, 0] #proportional, integral, derivative
 
     use_static_image_mode = args.use_static_image_mode
     min_detection_confidence = args.min_detection_confidence
     min_tracking_confidence = args.min_tracking_confidence
 
     use_brect = True
-    """ device = args.device
-    cap_width = args.width
-    cap_height = args.height
-    fps = 30 """
+    device = args.device
+    fps = 30
 
     ################################################################
-    """ cap = cv.VideoCapture(device)
+    cap = cv.VideoCapture(device)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
-    cap.set(cv.CAP_PROP_FPS, fps) """
+    cap.set(cv.CAP_PROP_FPS, fps)
 
     ##############################################################
     mp_hands = mp.solutions.hands
@@ -104,6 +117,7 @@ def main():
 
     #  ########################################################################
     mode = 0
+    gesture_list = deque(maxlen=10)
 
     while True:
         fps = cvFpsCalc.get()
@@ -122,7 +136,7 @@ def main():
         cap =  me.get_frame_read().frame
         cap = cv.resize(cap, (960, 720))
         image = cap
-        image = cv.flip(image, 1)
+        #image = cv.flip(image, 1)
         #image = objectDetection(image)
         debug_image = copy.deepcopy(image)
 
@@ -133,7 +147,6 @@ def main():
         results = hands.process(image)
         image.flags.writeable = True
 
-        #hand_ids = [100, 100]
 
         # Hand gesture is recognized here ####################################################################
         if results.multi_hand_landmarks is not None:
@@ -182,33 +195,76 @@ def main():
                 )
 
                 ##############################################################
+                
+
+                ##############################################################
                 if mode == 0:
-                    if hand_sign_id == 2:
+                    gesture_list.append(hand_sign_id)
+                    count = Counter(gesture_list).most_common()
+                    
+                    if count[0][1] >= (9):
+                        gesture_list.clear()
+
+                    gesture = count[0][0]
+
+                    """ if hand_sign_id == 0 and not in_flight:
                         print("Pointer: Takeoff")
-                        me.takeoff()
-                    elif hand_sign_id == 3:
+                        #in_flight = me.takeoff()
+                    elif hand_sign_id == 1 and in_flight:
                         print("OK: Land")
-                        me.land()
+                        me.land() """
+                    
+                    #gesture = th.Thread(target=input_buffer, args=(hand_sign_id))
+                    #gesture.start()
+                    drone_takeoff = th.Thread(target=drone_take_off, args=(me,))
+                    drone_land = th.Thread(target=drone_landing, args=(me,))
+
+                    control = th.Thread(target=drone_control, args=(me, hand_sign_id))
+                    control.start()
+
+                    if gesture == 0:
+                        if in_flight == False:
+                            gesture_list.clear()
+                            drone_takeoff.start()
+                            in_flight = True
+
+                    if gesture == 1:
+                        if in_flight == True:
+                            drone_land.start()
+                            in_flight = False
+                    # drone_control(me, hand_sign_id)
+                
+                curr_command = hand_sign_id
 
         else:
             point_history.append([0, 0])
         
         debug_image = draw_point_history(debug_image, point_history)
         debug_image = draw_info(debug_image, fps, mode, number)
+
         object_detection_results = objectDetection(image.copy())
-        finalizedImage = visualize(debug_image, object_detection_results)
+        object_tracked_image, info = findPersonToTrack(debug_image, object_detection_results) if len(object_detection_results.detections) >= 1 else (debug_image, None)
+        finalizedImage = visualize(object_tracked_image, object_detection_results)
+
+        if info is not None and in_flight:
+             pError = trackPerson(me, info, cap_width, pid, pError)
         #print(hand_ids)
 
         ##############################################################
         cv.imshow('Hand Gesture Recognition', finalizedImage)
+        #cv.imshow('Hand Gesture Recognition', debug_image)
 
-        if keyboard.is_pressed('esc'): # Point up
-            print("Pressed escape key")
-            pass
+        #if keyboard.is_pressed('esc'): # Point up
+            #print("Pressed escape key")
+            #pass
+
+        #if cv.waitKey(32): # Point up
+            #print("Pressed space key")
+            #me.land()
+            #in_flight = False
 
     cap.release()
     cv.destroyAllWindows()
-
 
 def select_mode(key, mode):
     number = -1
@@ -555,6 +611,88 @@ def draw_info(image, fps, mode, number):
                        cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
                        cv.LINE_AA)
     return image
+
+def input_buffer(gesture_id):
+    sleep(1)
+
+    return gesture_id
+
+def drone_take_off(drone):
+    drone.takeoff()
+
+def drone_landing(drone):
+    drone.land()
+
+
+def drone_control(drone, gesture_id):
+
+    left_right, forward_back, up_down, yaw = 0,0,0,0
+    speed = 30
+
+    #if gesture_id == 1:
+    #    drone.takeoff()
+        
+    #if gesture_id == 0:
+    #    sleep(2)
+    #    drone.land()
+
+    return
+
+def findPersonToTrack(frame, detection_results):
+    
+    filtered_objects = list(filter(lambda x: x.categories[0].category_name=="person", detection_results.detections))
+    main_object = sorted(filtered_objects, key=lambda person: person.bounding_box.width*person.bounding_box.height, reverse=True)[0] if len(filtered_objects) > 0 else None
+
+    center_x = None
+    center_y = None
+    area = None
+    new_frame = None
+    
+    if main_object is not None:
+        center_x = main_object.bounding_box.origin_x + main_object.bounding_box.width // 2
+        center_y = main_object.bounding_box.origin_y + main_object.bounding_box.height // 2 
+        area = main_object.bounding_box.width * main_object.bounding_box.height
+        new_frame = cv.circle(frame, (center_x, center_y), 5, (0, 255, 0), cv.FILLED)  
+        #objectList.append([center_x, center_y])
+
+    if new_frame is not None and center_x is not None:
+        return new_frame, [center_x, center_y, area]
+    else: 
+        return frame, None
+
+def trackPerson(me, info, w, pid, pError):
+    global cap_width, cap_height
+    screen_area = cap_width*cap_height
+    min_range, max_range = int(0.3*screen_area), int(0.7*screen_area)
+    fbRange = [min_range, max_range] 
+    fb = 0
+
+    area = info[2]
+    x,y = info[0], info[1]
+
+    error = x - w//2
+    speed = pid[0] * error + pid[1]* (error-pError)
+    speed = int(np.clip(speed,-20,20))
+
+    if area > fbRange[0] and area < fbRange[1]:
+        fb = 0
+        print("Still")
+    elif area > fbRange[1]: 
+        fb = -30
+        print("Back")
+    elif area < fbRange[0] and area != 0:
+        fb = 30
+        print("Forward")
+
+    print(error, fb, speed)
+
+    if x == 0: 
+        speed = 0
+        error = 0
+
+    me.send_rc_control(0,fb,0,speed)
+
+    return error
 
 
 if __name__ == '__main__':
