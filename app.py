@@ -46,6 +46,7 @@ args = get_args()
 cap_width = args.width
 cap_height = args.height
 in_flight = False
+drone_locked = False
 curr_command = None
 takeOFF = th.Event()
 landing = th.Event()
@@ -59,6 +60,7 @@ def main():
     me.connect()
     me.streamon()
     global in_flight
+    global drone_locked
 
     pError = 0 
     pid = [0.4, 0.4, 0] #proportional, integral, derivative
@@ -121,7 +123,7 @@ def main():
 
     while True:
         fps = cvFpsCalc.get()
-
+        print(in_flight)
 
         ##################################################
         key = cv.waitKey(10)
@@ -130,14 +132,10 @@ def main():
         number, mode = select_mode(key, mode)
 
         ######################################################
-        """ ret, image = cap.read()
-        if not ret:
-            break """
         cap =  me.get_frame_read().frame
         cap = cv.resize(cap, (960, 720))
         image = cap
-        #image = cv.flip(image, 1)
-        #image = objectDetection(image)
+        
         debug_image = copy.deepcopy(image)
 
         ##############################################################
@@ -207,15 +205,6 @@ def main():
 
                     gesture = count[0][0]
 
-                    """ if hand_sign_id == 0 and not in_flight:
-                        print("Pointer: Takeoff")
-                        #in_flight = me.takeoff()
-                    elif hand_sign_id == 1 and in_flight:
-                        print("OK: Land")
-                        me.land() """
-                    
-                    #gesture = th.Thread(target=input_buffer, args=(hand_sign_id))
-                    #gesture.start()
                     drone_takeoff = th.Thread(target=drone_take_off, args=(me,))
                     drone_land = th.Thread(target=drone_landing, args=(me,))
 
@@ -226,12 +215,19 @@ def main():
                         if in_flight == False:
                             gesture_list.clear()
                             drone_takeoff.start()
-                            in_flight = True
+            
 
                     if gesture == 1:
                         if in_flight == True:
                             drone_land.start()
-                            in_flight = False
+
+                    if gesture == 4 and in_flight:
+                        drone_locked = True
+
+                    if gesture == 5 and in_flight:
+                        drone_locked = False
+                        print("Locking drone!")
+                        
                     # drone_control(me, hand_sign_id)
                 
                 curr_command = hand_sign_id
@@ -249,19 +245,10 @@ def main():
         if info is not None and in_flight:
              pError = trackPerson(me, info, cap_width, pid, pError)
         #print(hand_ids)
+        print(f"Lock status: {drone_locked}")
 
         ##############################################################
         cv.imshow('Hand Gesture Recognition', finalizedImage)
-        #cv.imshow('Hand Gesture Recognition', debug_image)
-
-        #if keyboard.is_pressed('esc'): # Point up
-            #print("Pressed escape key")
-            #pass
-
-        #if cv.waitKey(32): # Point up
-            #print("Pressed space key")
-            #me.land()
-            #in_flight = False
 
     cap.release()
     cv.destroyAllWindows()
@@ -619,9 +606,13 @@ def input_buffer(gesture_id):
 
 def drone_take_off(drone):
     drone.takeoff()
+    global in_flight
+    in_flight = True
 
 def drone_landing(drone):
     drone.land()
+    global in_flight
+    in_flight = False
 
 
 def drone_control(drone, gesture_id):
@@ -670,27 +661,51 @@ def trackPerson(me, info, w, pid, pError):
     area = info[2]
     x,y = info[0], info[1]
 
+    minVerticalRange, maxVerticalRange = int(0.5*cap_height), int(0.7*cap_height) 
+    udRange = [minVerticalRange, maxVerticalRange]
+    ud = 0
+
     error = x - w//2
     speed = pid[0] * error + pid[1]* (error-pError)
-    speed = int(np.clip(speed,-20,20))
+    speed = int(np.clip(speed,-25,25))
 
-    if area > fbRange[0] and area < fbRange[1]:
+    if drone_locked:
+        fb = 0
+        print("Drone locked in place")
+
+    elif area > fbRange[0] and area < fbRange[1]:
         fb = 0
         print("Still")
     elif area > fbRange[1]: 
-        fb = -30
+        fb = -40
         print("Back")
     elif area < fbRange[0] and area != 0:
-        fb = 30
+        fb = 40
         print("Forward")
 
+    
+    if y > udRange[0] and y < udRange[1]:
+        ud = 0
+        print("Still vertical")
+    elif y > udRange[1]: 
+        ud = -10
+        print("Up")
+    elif y < fbRange[0] and y != 0:
+        ud = 10
+        print("Down")
+
+
     print(error, fb, speed)
+
+    if(speed > 0): print("Going right")
+    elif(speed < 0): print("Going left")
 
     if x == 0: 
         speed = 0
         error = 0
 
-    me.send_rc_control(0,fb,0,speed)
+    if in_flight:
+        me.send_rc_control(0,fb,ud,speed)
 
     return error
 
