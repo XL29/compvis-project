@@ -60,6 +60,5 @@ def objectDetection(frame):
   mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
   detection_result = detector.detect(mp_image) 
-  image_copy = np.copy(mp_image.numpy_view())
 
   return detection_result
